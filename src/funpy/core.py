@@ -82,20 +82,6 @@ class Func:
         f_kwargs: Mapping[str, ContextRef | ContextRefSentinel | Any],
         f_return: ContextRef | ContextRefSentinel | Any = _rv,
     ) -> None:
-        """
-        Modify the function to have different parameters or return values.
-
-        Positional args used in the decorator are appended to the regular positionals during the call.
-
-        Named args used in the decorator replace the named args during the call. Named args can also
-        be specified as _<number> (e.g. wrap(f, _2="hello world")) to be used as positionals
-        with the specified indices.
-
-        The return value of the function can also be modified with the "_return" parameter.
-
-        Sentinels (e.g. _0, _1, _rv, _kw["arg"]) are recommended for use wherever possible.
-        """
-
         self.f = f
         self.args = f_args
         self.kwargs = f_kwargs
