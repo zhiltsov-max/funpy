@@ -1,7 +1,9 @@
+from __future__ import annotations
+
 import itertools
 import operator
-from collections.abc import Callable, Sequence
-from functools import partial, wraps
+from collections.abc import Callable, Mapping, Sequence
+from functools import partial, update_wrapper, wraps
 from typing import Any, TypeVar, cast
 
 from funpy.context import (
@@ -23,6 +25,11 @@ from funpy.sentinel import (
     is_context_ref_sentinel,
 )
 
+try:
+    from typing import Self
+except ImportError:
+    from typing_extensions import Self
+
 
 def apply_ref(ref: Any | ContextRef | ContextRefSentinel, *, context: CallContext) -> Any:
     if is_context_ref_sentinel(ref):
@@ -38,6 +45,8 @@ def apply_ref(ref: Any | ContextRef | ContextRefSentinel, *, context: CallContex
             v = context.args[ref.index]
         elif isinstance(ref, NamedArgRef):
             v = context.kwargs[ref.name]
+            if ref.consume:
+                context.kwargs.pop(ref.name)
         elif isinstance(ref, ResultRef):
             if isinstance(context, PreCallContext):
                 raise InvalidContextReferenceError(
@@ -65,6 +74,96 @@ Tr = TypeVar("Tr")
 _UNDEFINED = object()
 
 
+class Func:
+    def __init__(
+        self,
+        f: Callable,
+        f_args: Sequence[ContextRef | ContextRefSentinel | Any],
+        f_kwargs: Mapping[str, ContextRef | ContextRefSentinel | Any],
+        f_return: ContextRef | ContextRefSentinel | Any = _rv,
+    ) -> None:
+        """
+        Modify the function to have different parameters or return values.
+
+        Positional args used in the decorator are appended to the regular positionals during the call.
+
+        Named args used in the decorator replace the named args during the call. Named args can also
+        be specified as _<number> (e.g. wrap(f, _2="hello world")) to be used as positionals
+        with the specified indices.
+
+        The return value of the function can also be modified with the "_return" parameter.
+
+        Sentinels (e.g. _0, _1, _rv, _kw["arg"]) are recommended for use wherever possible.
+        """
+
+        self.f = f
+        self.args = f_args
+        self.kwargs = f_kwargs
+        self.result = f_return
+
+        update_wrapper(self, f)
+
+    def __call__(self, *input_args, **input_kwargs) -> Any:
+        if len(input_args) == 1 and not input_kwargs and isinstance(input_args[0], CallArgs):
+            input_args, input_kwargs = input_args[0].as_tuple()
+
+        context = PreCallContext(func=self.f, args=input_args, kwargs=input_kwargs)
+
+        call_args = [
+            apply_ref(arg, context=context) for arg in itertools.chain(self.args or (), input_args)
+        ]
+
+        for k in tuple(self.kwargs):
+            if k.startswith("_") and k[1:].isdigit():
+                index = int(k[1:])
+
+                arg = self.kwargs.pop(k)
+                arg = apply_ref(arg, context=context)
+
+                if len(call_args) <= index:
+                    call_args.extend([_UNDEFINED] * (index + 1 - len(call_args)))
+
+                call_args[index] = arg
+
+        defined_arg_count = sum(v is not _UNDEFINED for v in call_args)
+        if defined_arg_count != len(call_args):
+            raise TypeError(
+                "{} expected at least {} arguments, got {}".format(
+                    self.f.__name__, len(call_args), defined_arg_count
+                )
+            )
+
+        call_kwargs = dict(input_kwargs)
+        call_kwargs.update(
+            {k: apply_ref(arg, context=context) for k, arg in (self.kwargs or {}).items()}
+        )
+
+        call_args = tuple(call_args)
+
+        call_result = self.f(*call_args, **call_kwargs)
+
+        context = PostCallContext(
+            func=self.f, args=call_args, kwargs=call_kwargs, result=call_result
+        )
+        return apply_ref(self.result, context=context)
+
+    def __or__(self, other: Callable) -> Func:
+        return chain(self, other)
+
+    def __ror__(self, other: Callable) -> Func:
+        return chain(other, self)
+
+    def __ior__(self, other: Callable) -> Self:
+        new_self = Func(self.f, f_args=self.args, f_kwargs=self.kwargs, f_return=self.result)
+        new_self = new_self | other
+
+        self.f = new_self.f
+        self.args = new_self.args
+        self.kwargs = new_self.kwargs
+        self.result = new_self.result
+        return self
+
+
 def wrap(
     f: Callable,
     *args: ContextRef | ContextRefSentinel | Any,
@@ -84,51 +183,7 @@ def wrap(
 
     Sentinels (e.g. _0, _1, _rv, _kw["arg"]) are recommended for use wherever possible.
     """
-
-    @wraps(f)
-    def wrapped(*input_args, **input_kwargs):
-        if len(input_args) == 1 and not input_kwargs and isinstance(input_args[0], CallArgs):
-            input_args, input_kwargs = input_args[0].as_tuple()
-
-        context = PreCallContext(func=f, args=input_args, kwargs=input_kwargs)
-
-        call_args = [
-            apply_ref(arg, context=context) for arg in itertools.chain(args or (), input_args)
-        ]
-
-        for k in tuple(kwargs):
-            if k.startswith("_") and k[1:].isdigit():
-                index = int(k[1:])
-
-                arg = kwargs.pop(k)
-                arg = apply_ref(arg, context=context)
-
-                if len(call_args) <= index:
-                    call_args.extend([_UNDEFINED] * (index + 1 - len(call_args)))
-
-                call_args[index] = arg
-
-        defined_arg_count = sum(v is not _UNDEFINED for v in call_args)
-        if defined_arg_count != len(call_args):
-            raise TypeError(
-                "{} expected at least {} arguments, got {}".format(
-                    f.__name__, len(call_args), defined_arg_count
-                )
-            )
-
-        call_kwargs = dict(input_kwargs)
-        call_kwargs.update(
-            {k: apply_ref(arg, context=context) for k, arg in (kwargs or {}).items()}
-        )
-
-        call_args = tuple(call_args)
-
-        call_result = f(*call_args, **call_kwargs)
-
-        context = PostCallContext(func=f, args=call_args, kwargs=call_kwargs, result=call_result)
-        return apply_ref(_return, context=context)
-
-    return wrapped
+    return Func(f, f_args=args, f_return=_return, f_kwargs=kwargs)
 
 
 side_call = partial(wrap, _return=_input_passthrough)
@@ -166,7 +221,8 @@ def thresholdify(f: Callable[..., R], *, threshold: Tr, op: Callable[[R, Tr], bo
     return thresholded
 
 
-def chain(*funcs: Callable) -> Callable:
+def chain(*funcs: Callable) -> Func:
+    @wrap
     def _chained(*input_args, **input_kwargs):
         call_args = CallArgs(args=input_args, kwargs=input_kwargs)
         for fn in funcs:

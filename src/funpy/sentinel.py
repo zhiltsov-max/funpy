@@ -20,7 +20,7 @@ _6 = partial(PositionalArgRef, index=6)
 _7 = partial(PositionalArgRef, index=7)
 _8 = partial(PositionalArgRef, index=8)
 _9 = partial(PositionalArgRef, index=9)
-_kw = partial(NamedArgRef)
+_kw = partial(NamedArgRef, consume=True)
 _rv = partial(ResultRef)
 _input_passthrough = partial(
     GenericContextRef, transform=lambda ctx: CallArgs(args=ctx.args, kwargs=ctx.kwargs)

@@ -48,6 +48,7 @@ class PositionalArgRef(ContextRef, SimpleTransformableRef):
 @define
 class NamedArgRef(ContextRef, SimpleTransformableRef):
     name: str
+    consume: bool = False
 
 
 @define
