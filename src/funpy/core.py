@@ -4,7 +4,7 @@ import itertools
 import operator
 from collections.abc import Callable, Mapping, Sequence
 from functools import partial, update_wrapper, wraps
-from typing import Any, TypeVar, cast
+from typing import Any, TypeVar
 
 from funpy.context import (
     CallArgs,
@@ -31,10 +31,13 @@ except ImportError:
     from typing_extensions import Self
 
 
+def materialize_sentinel(sentinel: ContextRefSentinel) -> ContextRef:
+    return sentinel()
+
+
 def apply_ref(ref: Any | ContextRef | ContextRefSentinel, *, context: CallContext) -> Any:
     if is_context_ref_sentinel(ref):
-        s = cast(ContextRefSentinel, ref)
-        ref = s()  # TODO: try to implement type checked narrowing
+        ref = materialize_sentinel(ref)
 
     if isinstance(ref, ContextRef):
         if isinstance(ref, GenericContextRef):
