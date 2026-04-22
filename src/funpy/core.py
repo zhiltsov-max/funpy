@@ -221,11 +221,13 @@ def thresholdify(f: Callable[..., R], *, threshold: Tr, op: Callable[[R, Tr], bo
     return thresholded
 
 
-def chain(*funcs: Callable) -> Func:
-    @wrap
-    def _chained(*input_args, **input_kwargs):
+class Chain:
+    def __init__(self, funcs: Sequence[Callable]) -> None:
+        self.funcs = funcs
+
+    def __call__(self, *input_args, **input_kwargs):
         call_args = CallArgs(args=input_args, kwargs=input_kwargs)
-        for fn in funcs:
+        for fn in self.funcs:
             result = fn(*call_args.args, **call_args.kwargs)
 
             if isinstance(result, CallArgs):
@@ -238,4 +240,6 @@ def chain(*funcs: Callable) -> Func:
         else:
             return call_args
 
-    return _chained
+
+def chain(*funcs: Callable) -> Func:
+    return wrap(Chain(funcs))
