@@ -1,7 +1,9 @@
+from __future__ import annotations
+
 from collections.abc import Sequence
 from typing import Any, Callable
 
-from attrs import define
+from attrs import define, field
 
 from funpy.errors import CompositeCallArgsError
 
@@ -55,8 +57,12 @@ class ResultRef(ContextRef, SimpleTransformableRef):
 
 @define
 class CallArgs:
-    args: Sequence[Any]
-    kwargs: dict[str, Any]
+    args: Sequence[Any] = field(factory=tuple)
+    kwargs: dict[str, Any] = field(factory=dict)
+
+    @classmethod
+    def from_return(cls, value: Any) -> CallArgs:
+        return cls((value,))
 
     def __len__(self) -> int:
         if self.kwargs:
@@ -77,3 +83,13 @@ class CallArgs:
 
     def as_tuple(self) -> tuple[Sequence[Any], dict[str, Any]]:
         return self.args, self.kwargs
+
+    @property
+    def is_trivial(self) -> bool:
+        return len(self.args) == 1 and not self.kwargs
+
+    def value(self) -> Any:
+        if not self.is_trivial:
+            raise CompositeCallArgsError()
+
+        return self.args[0]

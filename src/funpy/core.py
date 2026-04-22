@@ -103,8 +103,8 @@ def wrap(
                 arg = kwargs.pop(k)
                 arg = apply_ref(arg, context=context)
 
-                if len(call_args) < index:
-                    call_args.extend([_UNDEFINED] * len(call_args) - index)
+                if len(call_args) <= index:
+                    call_args.extend([_UNDEFINED] * (index + 1 - len(call_args)))
 
                 call_args[index] = arg
 
@@ -164,3 +164,22 @@ def thresholdify(f: Callable[..., R], *, threshold: Tr, op: Callable[[R, Tr], bo
         return op(f(*args, **kwargs), threshold)
 
     return thresholded
+
+
+def chain(*funcs: Callable) -> Callable:
+    def _chained(*input_args, **input_kwargs):
+        call_args = CallArgs(args=input_args, kwargs=input_kwargs)
+        for fn in funcs:
+            result = fn(*call_args.args, **call_args.kwargs)
+
+            if isinstance(result, CallArgs):
+                call_args = result
+            else:
+                call_args = CallArgs.from_return(result)
+
+        if call_args.is_trivial:
+            return call_args.value()
+        else:
+            return call_args
+
+    return _chained

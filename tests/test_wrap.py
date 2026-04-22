@@ -1,4 +1,7 @@
+import operator
 from typing import TypeVar
+
+from attrs import define, field
 
 import funpy as fp
 
@@ -36,26 +39,46 @@ def test_can_bind_result():
     assert wrapped(1, 2) == 3
 
 
+@define
+class CallRecorder:
+    calls: list[fp.CallArgs] = field(factory=list)
+
+    def __call__(self, *args, **kwargs):
+        self.calls.append(fp.CallArgs(args=args, kwargs=kwargs))
+
+
 def test_can_make_side_call():
-    side_called_args = []
+    recorder = CallRecorder()
 
-    def side_call(*args, **kwargs):
-        nonlocal side_called_args
-        side_called_args.append({"args": args, "kwargs": kwargs})
-
-    wrapped = fp.side_call(side_call)
+    wrapped = fp.side_call(recorder)
 
     result = wrapped("hello", kwarg="world")
 
-    assert side_called_args == [
-        {
-            "args": ("hello",),
-            "kwargs": {
-                "kwarg": "world",
-            },
-        }
-    ]
+    assert [
+        fp.CallArgs(
+            args=("hello",),
+            kwargs={"kwarg": "world"},
+        )
+    ] == recorder.calls
 
     assert isinstance(result, fp.CallArgs)
     assert result.args == ("hello",)
     assert result.kwargs == {"kwarg": "world"}
+
+
+def test_can_chain_calls():
+    recorder = CallRecorder()
+
+    def _ternary_func(a: int, b: int, c: int) -> int:
+        return c
+
+    chain = fp.chain(
+        operator.add,
+        fp.side_call(recorder),
+        fp.wrap(operator.sub, _1=2),
+        fp.side_call(recorder),
+        fp.wrap(_ternary_func, _0=0, _1=1, _2=fp._0),
+    )
+
+    assert chain(1, 5) == 4
+    assert recorder.calls == [fp.CallArgs(args=(6,)), fp.CallArgs(args=(4,))]
